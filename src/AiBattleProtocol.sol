@@ -75,7 +75,7 @@ contract AIBattleProtocol {
     event Staked(address indexed staker, address indexed agent, uint amount);
     event UnstakeRequested(address indexed staker, address indexed agent, uint amount, uint availableAt);
     event Unstaked(address indexed staker, address indexed agent, uint amount);
-    event BattleChallenged(address indexed challenger, address indexed opponent);
+    // event BattleChallenged(address indexed challenger, address indexed opponent);
     event BattleResult(address winner, address loser, uint tokensTransferred, bool agentDied);
     event AllianceFormed(address agent1, address agent2);
     event AllianceBroken(address agent1, address agent2);
