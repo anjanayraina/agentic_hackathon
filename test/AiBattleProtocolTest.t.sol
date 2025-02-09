@@ -129,4 +129,17 @@ contract AIBattleProtocolTest is Test {
         assertEq(alliance1, address(0), "Agent1 alliance should be cleared");
         assertEq(alliance2, address(0), "Agent2 alliance should be cleared");
     }
+
+    function testAgentList() public {
+        // Retrieve the full list of agents.
+        address[] memory list = protocol.getAgentList();
+        assertEq(list.length, 4, "There should be 4 agents in the list");
+        assertEq(list[0], agent1, "First agent should be agent1");
+        assertEq(list[1], agent2, "Second agent should be agent2");
+        assertEq(list[2], agent3, "Third agent should be agent3");
+        assertEq(list[3], agent4, "Fourth agent should be agent4");
+        // Also verify that the agents mapping holds valid data.
+        (string memory name, address addr, uint x, uint y, uint availableAfter, bool alive, address alliance) = protocol.agents(agent1);
+        assertEq(addr, agent1, "Agent1 stored address should match agent1");
+    }
 }

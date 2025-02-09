@@ -71,6 +71,7 @@ contract AIBattleProtocol {
     event BattleResult(address winner, address loser, uint tokensTransferred, bool agentDied);
     event AllianceFormed(address agent1, address agent2);
     event AllianceBroken(address agent1, address agent2);
+    event BattleChallenged(address indexed challenger, address indexed opponent);
     
     // --- Constructor ---
     /**
@@ -90,6 +91,7 @@ contract AIBattleProtocol {
     ) {
         token = _token;
         for (uint i = 0; i < 4; i++) {
+            require(agentAddresses[i] != address(0), "Invalid agent address");
             Agent memory a = Agent({
                 name: names[i],
                 addr: agentAddresses[i],
@@ -102,6 +104,14 @@ contract AIBattleProtocol {
             agents[agentAddresses[i]] = a;
             agentList.push(agentAddresses[i]);
         }
+    }
+    
+    // --- Agent List Getter ---
+    /**
+     * @notice Returns the full list of agent addresses.
+     */
+    function getAgentList() public view returns (address[] memory) {
+        return agentList;
     }
     
     // --- Internal Helpers ---
@@ -315,7 +325,4 @@ contract AIBattleProtocol {
         allianceCooldown[pairKey] = block.timestamp + 24 hours;
         emit AllianceBroken(msg.sender, partner);
     }
-    
-    // --- Event Declaration for Battle Challenge ---
-    event BattleChallenged(address indexed challenger, address indexed opponent);
 }
