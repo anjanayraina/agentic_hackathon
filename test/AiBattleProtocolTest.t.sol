@@ -50,23 +50,49 @@ contract AIBattleProtocolTest is Test {
     }
 
     function testStake() public {
-        // staker stakes 100 tokens for agent1.
+        // staker deposits 100 tokens for agent1.
         uint stakeAmount = 100 * 1e18;
         vm.prank(staker);
         protocol.stakeForAgent(agent1, stakeAmount);
 
-        uint total = protocol.totalStaked(agent1);
-        assertEq(total, stakeAmount, "Total staked for agent1 should be 100 tokens");
+        // Check underlying vault balances.
+        uint underlying = protocol.totalStaked(agent1);
+        uint shares = protocol.totalShares(agent1);
+        assertEq(underlying, stakeAmount, "Underlying tokens for agent1 should be 100 tokens");
+        // For the first deposit, shares minted equal the deposit amount.
+        assertEq(shares, stakeAmount, "Vault shares for agent1 should equal the deposit amount");
+    }
+
+    function testWithdraw() public {
+        // Deposit 100 tokens for agent1.
+        uint depositAmount = 100 * 1e18;
+        vm.prank(staker);
+        protocol.stakeForAgent(agent1, depositAmount);
+
+        // Get the staker's shares for agent1.
+        uint shares = protocol.stakerShares(agent1, staker);
+        // Now withdraw all shares.
+        vm.prank(staker);
+        protocol.withdraw(agent1, shares);
+
+        // After withdrawal, the vault's underlying balance and total shares should be 0.
+        uint underlying = protocol.totalStaked(agent1);
+        uint totalShares = protocol.totalShares(agent1);
+        assertEq(underlying, 0, "Underlying tokens for agent1 should be 0 after withdrawal");
+        assertEq(totalShares, 0, "Total vault shares for agent1 should be 0 after withdrawal");
+        // The staker's share balance should also be 0.
+        uint stakerShareBalance = protocol.stakerShares(agent1, staker);
+        assertEq(stakerShareBalance, 0, "Staker's share balance should be 0 after withdrawal");
     }
 
     function testBattle() public {
-        // staker stakes tokens for agent1 and agent2.
-        uint stakeAmount1 = 100 * 1e18;
-        uint stakeAmount2 = 50 * 1e18;
+        // staker deposits tokens for agent1 and agent2.
+        uint depositAmount1 = 100 * 1e18;
+        uint depositAmount2 = 50 * 1e18;
         vm.prank(staker);
-        protocol.stakeForAgent(agent1, stakeAmount1);
+        protocol.stakeForAgent(agent1, depositAmount1);
         vm.prank(staker);
-        protocol.stakeForAgent(agent2, stakeAmount2);
+        protocol.stakeForAgent(agent2, depositAmount2);
 
         // Agent1 challenges agent2 (agents are adjacent per starting positions).
         vm.prank(agent1);
@@ -76,10 +102,10 @@ contract AIBattleProtocolTest is Test {
         vm.prank(agent2);
         protocol.acceptBattle(agent1);
 
-        // The sum of tokens staked for agent1 and agent2 should remain the same.
-        uint total1 = protocol.totalStaked(agent1);
-        uint total2 = protocol.totalStaked(agent2);
-        assertEq(total1 + total2, stakeAmount1 + stakeAmount2, "Total tokens should remain constant after battle");
+        // The sum of underlying tokens for agent1 and agent2 should remain constant.
+        uint underlying1 = protocol.totalStaked(agent1);
+        uint underlying2 = protocol.totalStaked(agent2);
+        assertEq(underlying1 + underlying2, depositAmount1 + depositAmount2, "Total underlying tokens should remain constant after battle");
     }
 
     function testAlliance() public {
