@@ -51,10 +51,6 @@ contract AIBattleProtocol {
     // For each agent, each staker’s share balance.
     mapping(address => mapping(address => uint)) public stakerShares;
     
-    // --- Battle Challenge ---
-    // Mapping: challenger => challenged opponent.
-    mapping(address => address) public pendingBattle;
-    
     // --- Alliance Proposals ---
     // Each agent can propose an alliance with another.
     mapping(address => mapping(address => bool)) public allianceProposals;
@@ -222,30 +218,20 @@ contract AIBattleProtocol {
     // --- Battle Functions ---
     /**
      * @notice Initiate a battle challenge from the caller to an opponent.
-     * The two agents must be adjacent.
+     * The two agents must be adjacent. This function immediately triggers a battle,
+     * even if only one agent expressed the desire to battle.
      */
     function challengeBattle(address opponent) external {
         require(agents[msg.sender].alive && agents[opponent].alive, "Both agents must be alive");
         require(areAdjacent(msg.sender, opponent), "Agents not adjacent");
-        pendingBattle[msg.sender] = opponent;
         emit BattleChallenged(msg.sender, opponent);
-    }
-    
-    /**
-     * @notice Accept a battle challenge. The challenged agent calls this with the challenger’s address.
-     * The outcome is decided using pseudo–randomness weighted by the total tokens staked.
-     */
-    function acceptBattle(address challenger) external {
-        require(agents[msg.sender].alive && agents[challenger].alive, "Both agents must be alive");
-        require(areAdjacent(msg.sender, challenger), "Agents not adjacent");
-        require(pendingBattle[challenger] == msg.sender, "No challenge from challenger");
         
         // Compute effective stakes.
-        uint stakeA = totalStaked[challenger];
+        uint stakeA = totalStaked[opponent];
         uint stakeB = totalStaked[msg.sender];
         // If an agent is allied, add its partner’s stake.
-        if (agents[challenger].alliance != address(0)) {
-            stakeA += totalStaked[agents[challenger].alliance];
+        if (agents[opponent].alliance != address(0)) {
+            stakeA += totalStaked[agents[opponent].alliance];
         }
         if (agents[msg.sender].alliance != address(0)) {
             stakeB += totalStaked[agents[msg.sender].alliance];
@@ -253,7 +239,7 @@ contract AIBattleProtocol {
         require(stakeA + stakeB > 0, "No tokens staked");
         
         // Use pseudo–randomness (insecure for production) to decide the outcome.
-        uint randomValue = uint(keccak256(abi.encodePacked(block.timestamp, block.difficulty, msg.sender, challenger)));
+        uint randomValue = uint(keccak256(abi.encodePacked(block.timestamp, block.difficulty, msg.sender, opponent)));
         // Challenger wins with probability = stakeA/(stakeA+stakeB).
         uint threshold = (stakeA * 1e18) / (stakeA + stakeB);
         uint outcome = randomValue % 1e18;
@@ -261,11 +247,11 @@ contract AIBattleProtocol {
         address winner;
         address loser;
         if (outcome < threshold) {
-            winner = challenger;
+            winner = opponent;
             loser = msg.sender;
         } else {
             winner = msg.sender;
-            loser = challenger;
+            loser = opponent;
         }
         
         // Determine percentage transfer: random between 21 and 30%.
@@ -283,9 +269,7 @@ contract AIBattleProtocol {
         totalStaked[loser] -= tokensToTransfer;
         totalStaked[winner] += tokensToTransfer;
         
-        // Note: Vault share balances remain unchanged so that the value per share adjusts.
-        pendingBattle[challenger] = address(0);
-        
+        // Vault share balances remain unchanged so that the value per share adjusts.
         emit BattleResult(winner, loser, tokensToTransfer, died);
     }
     

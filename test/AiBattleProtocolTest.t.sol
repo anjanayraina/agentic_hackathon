@@ -94,13 +94,9 @@ contract AIBattleProtocolTest is Test {
         vm.prank(staker);
         protocol.stakeForAgent(agent2, depositAmount2);
 
-        // Agent1 challenges agent2 (agents are adjacent per starting positions).
+        // Agent1 challenges agent2; battle occurs immediately.
         vm.prank(agent1);
         protocol.challengeBattle(agent2);
-
-        // Agent2 accepts the battle.
-        vm.prank(agent2);
-        protocol.acceptBattle(agent1);
 
         // The sum of underlying tokens for agent1 and agent2 should remain constant.
         uint underlying1 = protocol.totalStaked(agent1);
