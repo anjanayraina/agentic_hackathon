@@ -9,9 +9,9 @@ import "./utils/FieldUtils.sol";
  * @notice Implements a simplified version of the AIBattleProtocol game.
  *
  * Agents (represented by externally owned accounts) are registered with initial
- * positions on a grid. They can move (subject to field delays), stake tokens,
- * challenge one another to battles (with outcomes weighted by staked tokens), and
- * form alliances.
+ * positions on a grid. They can move (subject to field delays), deposit tokens
+ * into their vault (in exchange for vault shares), challenge one another to battles
+ * (with outcomes weighted by the underlying staked tokens), and form alliances.
  *
  * The staking token used is the AIAgentToken.
  *
@@ -43,19 +43,13 @@ contract AIBattleProtocol {
     mapping(address => Agent) public agents;
     address[] public agentList;
     
-    // --- Staking Data ---
-    // Total tokens staked for each agent.
+    // --- Vault Data for Staking ---
+    // The underlying token amount in the vault for each agent.
     mapping(address => uint) public totalStaked;
-    // For each agent, each staker’s balance.
-    mapping(address => mapping(address => uint)) public stakerBalances;
-    
-    // For unstaking, we use a pending withdrawal structure.
-    struct PendingWithdrawal {
-        uint amount;
-        uint availableAt;
-    }
-    // Mapping: agent => staker => pending withdrawal.
-    mapping(address => mapping(address => PendingWithdrawal)) public pendingWithdrawals;
+    // The total vault shares for each agent.
+    mapping(address => uint) public totalShares;
+    // For each agent, each staker’s share balance.
+    mapping(address => mapping(address => uint)) public stakerShares;
     
     // --- Battle Challenge ---
     // Mapping: challenger => challenged opponent.
@@ -72,10 +66,8 @@ contract AIBattleProtocol {
     
     // --- Events ---
     event AgentMoved(address indexed agent, uint newX, uint newY, FieldUtils.FieldType fieldType, uint availableAfter);
-    event Staked(address indexed staker, address indexed agent, uint amount);
-    event UnstakeRequested(address indexed staker, address indexed agent, uint amount, uint availableAt);
-    event Unstaked(address indexed staker, address indexed agent, uint amount);
-    // event BattleChallenged(address indexed challenger, address indexed opponent);
+    event Staked(address indexed staker, address indexed agent, uint amount, uint sharesMinted);
+    event Unstaked(address indexed staker, address indexed agent, uint amountRedeemed, uint sharesBurned);
     event BattleResult(address winner, address loser, uint tokensTransferred, bool agentDied);
     event AllianceFormed(address agent1, address agent2);
     event AllianceBroken(address agent1, address agent2);
@@ -151,57 +143,57 @@ contract AIBattleProtocol {
         FieldUtils.FieldType fType = FieldUtils.getFieldType(agent.x, agent.y);
         uint delay = 1 hours;
         if (fType == FieldUtils.FieldType.Mountain) {
-            delay = 2 hours;
+            delay = 3 hours;
         } else if (fType == FieldUtils.FieldType.River) {
-            delay = 1 hours; // same delay as normal movement here.
+            delay = 2 hours;
         }
         agent.availableAfter = block.timestamp + delay;
         
         emit AgentMoved(msg.sender, agent.x, agent.y, fType, agent.availableAfter);
     }
     
-    // --- Staking Functions ---
+    // --- Vault (Staking/Unstaking) Functions ---
     /**
-     * @notice Stake tokens in an agent’s pool.
-     * The caller must have approved this contract to spend the tokens.
+     * @notice Deposit tokens for an agent. Tokens are locked in the vault
+     * and the depositor receives vault shares in return.
+     * The first deposit is 1:1 (shares = tokens); subsequent deposits mint shares
+     * proportional to the current exchange rate.
      */
     function stakeForAgent(address agentAddress, uint amount) external {
         require(agents[agentAddress].alive, "Agent is not alive");
         require(amount > 0, "Amount must be > 0");
         require(token.transferFrom(msg.sender, address(this), amount), "Token transfer failed");
         
-        stakerBalances[agentAddress][msg.sender] += amount;
+        uint sharesToMint;
+        // If vault is empty, mint shares equal to the deposit amount.
+        if (totalShares[agentAddress] == 0) {
+            sharesToMint = amount;
+        } else {
+            // Calculate shares to mint based on the current ratio.
+            sharesToMint = (amount * totalShares[agentAddress]) / totalStaked[agentAddress];
+        }
+        
+        stakerShares[agentAddress][msg.sender] += sharesToMint;
+        totalShares[agentAddress] += sharesToMint;
         totalStaked[agentAddress] += amount;
         
-        emit Staked(msg.sender, agentAddress, amount);
+        emit Staked(msg.sender, agentAddress, amount, sharesToMint);
     }
     
     /**
-     * @notice Initiate an unstake request (with a 2–hour delay).
+     * @notice Withdraw tokens by burning vault shares.
+     * The amount of tokens returned is proportional to the staker's share of the vault.
      */
-    function requestUnstake(address agentAddress, uint amount) external {
-        require(stakerBalances[agentAddress][msg.sender] >= amount, "Insufficient staked balance");
-        stakerBalances[agentAddress][msg.sender] -= amount;
-        totalStaked[agentAddress] -= amount;
-        uint availableAt = block.timestamp + 2 hours;
-        pendingWithdrawals[agentAddress][msg.sender] = PendingWithdrawal({
-            amount: amount,
-            availableAt: availableAt
-        });
-        emit UnstakeRequested(msg.sender, agentAddress, amount, availableAt);
-    }
-    
-    /**
-     * @notice Complete an unstake request after the delay has passed.
-     */
-    function completeUnstake(address agentAddress) external {
-        PendingWithdrawal storage withdrawal = pendingWithdrawals[agentAddress][msg.sender];
-        require(withdrawal.amount > 0, "No pending withdrawal");
-        require(block.timestamp >= withdrawal.availableAt, "Withdrawal not ready");
-        uint amount = withdrawal.amount;
-        withdrawal.amount = 0;
-        require(token.transfer(msg.sender, amount), "Token transfer failed");
-        emit Unstaked(msg.sender, agentAddress, amount);
+    function withdraw(address agentAddress, uint shareAmount) external {
+        require(stakerShares[agentAddress][msg.sender] >= shareAmount, "Insufficient share balance");
+        uint tokenAmount = (shareAmount * totalStaked[agentAddress]) / totalShares[agentAddress];
+        
+        stakerShares[agentAddress][msg.sender] -= shareAmount;
+        totalShares[agentAddress] -= shareAmount;
+        totalStaked[agentAddress] -= tokenAmount;
+        
+        require(token.transfer(msg.sender, tokenAmount), "Token transfer failed");
+        emit Unstaked(msg.sender, agentAddress, tokenAmount, shareAmount);
     }
     
     // --- Interaction Utilities ---
@@ -281,7 +273,7 @@ contract AIBattleProtocol {
         totalStaked[loser] -= tokensToTransfer;
         totalStaked[winner] += tokensToTransfer;
         
-        // Clear the challenge.
+        // Note: Vault share balances remain unchanged so that the value per share adjusts.
         pendingBattle[challenger] = address(0);
         
         emit BattleResult(winner, loser, tokensToTransfer, died);
@@ -324,6 +316,6 @@ contract AIBattleProtocol {
         emit AllianceBroken(msg.sender, partner);
     }
     
-    // --- Events for clarity (these events use the same names as before) ---
+    // --- Event Declaration for Battle Challenge ---
     event BattleChallenged(address indexed challenger, address indexed opponent);
 }
